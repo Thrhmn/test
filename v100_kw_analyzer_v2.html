@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>V100 KW Digit Analyzer</title>
+<style>
+  :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f172a;color:#e5e7eb}
+  *{box-sizing:border-box} body{margin:0;background:#0f172a}
+  .wrap{max-width:1050px;margin:auto;padding:18px}
+  h1{font-size:22px;margin:0 0 5px}.sub{color:#94a3b8;font-size:13px;margin-bottom:16px}
+  .bar,.card{background:#172033;border:1px solid #29364d;border-radius:14px;padding:14px;margin-bottom:12px}
+  .bar{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+  select,button,input{background:#0b1220;color:#e5e7eb;border:1px solid #3a4a63;border-radius:9px;padding:9px 11px}
+  button{cursor:pointer;background:#2563eb;border-color:#2563eb;font-weight:600}
+  button.secondary{background:#263449;border-color:#3a4a63}
+  button.danger{background:#b91c1c;border-color:#b91c1c}
+  .status{font-size:12px;color:#94a3b8;margin-left:auto}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .metric{background:#0d1525;border-radius:11px;padding:12px}.label{font-size:11px;color:#94a3b8}.value{font-size:23px;font-weight:750;margin-top:3px}
+  .pred{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:10px}
+  .hero{display:flex;align-items:center;gap:16px}.digit{font-size:76px;line-height:1;font-weight:900}
+  .confidence{font-size:30px;font-weight:800}.muted{color:#94a3b8;font-size:12px}
+  .digits{display:grid;grid-template-columns:repeat(10,1fr);gap:5px;margin-top:10px}
+  .d{background:#0b1220;border-radius:8px;text-align:center;padding:8px 2px}.d b{display:block;font-size:18px}.d span{font-size:10px;color:#94a3b8}
+  table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:7px;border-bottom:1px solid #29364d;text-align:right}th:first-child,td:first-child{text-align:left}
+  .note{font-size:12px;line-height:1.5;color:#cbd5e1}
+  .warn{border-left:4px solid #f59e0b;padding-left:10px}
+  .good{color:#86efac}.bad{color:#fca5a5}
+  @media(max-width:750px){.grid{grid-template-columns:repeat(2,1fr)}.pred{grid-template-columns:1fr}.status{width:100%;margin-left:0}.digits{grid-template-columns:repeat(5,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>V100 KW Digit Analyzer</h1>
+  <div class="sub">Eksperimen lokal — public tick data Deriv, tidak melakukan order otomatis.</div>
+
+  <div class="bar">
+    <label>Symbol
+      <select id="symbol"><option value="1HZ100V">Volatility 100 (1s) — 1HZ100V</option></select>
+    </label>
+    <label>Window
+      <select id="window">
+        <option value="30">30 ticks</option><option value="50">50 ticks</option>
+        <option value="100" selected>100 ticks</option><option value="250">250 ticks</option>
+        <option value="500">500 ticks</option>
+      </select>
+    </label>
+    <button id="connect">Connect</button>
+    <button id="disconnect" class="secondary">Disconnect</button>
+    <button id="clear" class="danger">Clear data</button>
+    <span id="status" class="status">Disconnected</span>
+  </div>
+
+  <div class="grid">
+    <div class="metric"><div class="label">LAST QUOTE</div><div class="value" id="quote">—</div></div>
+    <div class="metric"><div class="label">LAST DIGIT</div><div class="value" id="last">—</div></div>
+    <div class="metric"><div class="label">SAMPLE</div><div class="value" id="sample">0</div></div>
+    <div class="metric"><div class="label">NEXT TICK</div><div class="value" id="next">—</div></div>
+  </div>
+
+  <div class="card">
+    <div class="hero">
+      <div>
+        <div class="label">MODEL PREDICTION — 1 TICK AHEAD</div>
+        <div class="digit" id="pred">—</div>
+      </div>
+      <div>
+        <div class="confidence" id="conf">—</div>
+        <div class="muted">conditional estimate</div>
+        <div class="muted" id="detail">Menunggu data...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <b>Last-digit frequency</b>
+    <div class="digits" id="freq"></div>
+  </div>
+
+  <div class="card">
+    <b>Live paper test</b>
+    <div class="muted" style="margin:5px 0 10px">Setiap prediction dikunci sebelum tick berikutnya. Ini dipakai untuk mengukur apakah model benar-benar punya edge.</div>
+    <div class="grid">
+      <div class="metric"><div class="label">LOCKED SIGNALS</div><div class="value" id="signals">0</div></div>
+      <div class="metric"><div class="label">CORRECT</div><div class="value" id="correct">0</div></div>
+      <div class="metric"><div class="label">ACCURACY</div><div class="value" id="accuracy">—</div></div>
+      <div class="metric"><div class="label">BASELINE</div><div class="value">10%</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <b>Model yang dipakai (versi KW)</b>
+    <p class="note">
+      1) Hitung frekuensi digit dalam window. 2) Hitung transition: setelah digit terakhir X, digit apa yang paling sering muncul.
+      3) Gabungkan frequency + transition dengan smoothing Laplace. 4) Pilih digit dengan skor tertinggi.
+      Confidence yang ditampilkan adalah probabilitas empiris model pada sampel yang sedang diamati, <b>bukan jaminan probabilitas hasil trade</b>.
+    </p>
+    <p class="note warn">Kalau Synthetic Index benar-benar menghasilkan digit secara uniform/independen, model ini seharusnya mendekati 10% dan tidak memberi edge. Justru itu yang ingin kita uji.</p>
+  </div>
+
+  <div class="card">
+    <b>Recent locked predictions</b>
+    <table><thead><tr><th>Waktu</th><th>Prev</th><th>Prediction</th><th>Actual</th><th>Result</th></tr></thead>
+    <tbody id="log"></tbody></table>
+  </div>
+</div>
+
+<script>
+let ws=null, ticks=[], locked=null, logRows=[], signals=0, correct=0;
+
+const $ = id => document.getElementById(id);
+function setStatus(s){$("status").textContent=s}
+function digitFromTick(t){
+  // Deriv provides pip_size with tick responses. Preserve the displayed decimal precision.
+  const q=Number(t.quote);
+  const p=Number.isInteger(t.pip_size)?t.pip_size:null;
+  const s=p!==null ? q.toFixed(p) : String(t.quote);
+  const m=s.match(/(\d)$/);
+  return m ? Number(m[1]) : null;
+}
+function getWindow(){return Number($("window").value)}
+function counts(arr){
+  const c=Array(10).fill(0);
+  arr.forEach(d=>{if(Number.isInteger(d))c[d]++});
+  return c;
+}
+function model(){
+  const n=getWindow(), a=ticks.slice(-n);
+  if(a.length<12) return null;
+  const c=counts(a);
+  const prev=a[a.length-1];
+  const trans=Array(10).fill(0);
+  for(let i=0;i<a.length-1;i++) if(a[i]===prev) trans[a[i+1]]++;
+  const totalTrans=trans.reduce((x,y)=>x+y,0);
+
+  // Laplace smoothing prevents zero-probability artifacts.
+  const freqP=c.map(x=>(x+1)/(a.length+10));
+  const transP=trans.map(x=>(x+1)/(totalTrans+10));
+
+  // 35% frequency + 65% conditional transition.
+  const score=freqP.map((x,i)=>0.35*x+0.65*transP[i]);
+  let best=0;
+  for(let i=1;i<10;i++) if(score[i]>score[best]) best=i;
+  const sum=score.reduce((x,y)=>x+y,0);
+  const conf=score[best]/sum;
+
+  return {best,conf,c,prev,trans,totalTrans,n};
+}
+function render(){
+  const m=model(), a=ticks.slice(-getWindow());
+  $("sample").textContent=a.length;
+  $("last").textContent=a.length? a[a.length-1]:"—";
+  const c=counts(a), total=a.length||1;
+  $("freq").innerHTML=c.map((x,i)=>`<div class="d"><b>${i}</b><span>${x} (${(100*x/total).toFixed(1)}%)</span></div>`).join("");
+  if(!m){$("pred").textContent="—";$("conf").textContent="—";$("next").textContent="—";$("detail").textContent="Kumpulkan minimal 12 ticks.";return}
+  $("pred").textContent=m.best;
+  $("conf").textContent=(100*m.conf).toFixed(1)+"%";
+  $("next").textContent=m.best;
+  $("detail").textContent=`prev=${m.prev} | ${m.totalTrans} transisi dari digit ${m.prev} | window=${m.n}`;
+}
+function lockAndScore(actual){
+  if(!locked)return;
+  signals++;
+  const ok=actual===locked.pred;
+  if(ok)correct++;
+  logRows.unshift({time:new Date(locked.time).toLocaleTimeString(),prev:locked.prev,pred:locked.pred,actual,ok});
+  logRows=logRows.slice(0,30);
+  $("signals").textContent=signals;
+  $("correct").textContent=correct;
+  $("accuracy").textContent=signals?((100*correct/signals).toFixed(1)+"%"):"—";
+  $("log").innerHTML=logRows.map(r=>`<tr><td>${r.time}</td><td>${r.prev}</td><td>${r.pred}</td><td>${r.actual}</td><td class="${r.ok?'good':'bad'}">${r.ok?'WIN':'MISS'}</td></tr>`).join("");
+  locked=null;
+}
+function onTick(t){
+  const d=digitFromTick(t);
+  $("quote").textContent=Number(t.quote).toString();
+  if(d===null)return;
+  // Prediction must be computed BEFORE adding the new tick to avoid look-ahead.
+  lockAndScore(d);
+  const m=model();
+  if(m) locked={pred:m.best,prev:m.prev,time:Date.now()};
+  ticks.push(d);
+  if(ticks.length>1000)ticks=ticks.slice(-1000);
+  render();
+}
+let reconnectTimer=null, endpointIndex=0;
+const ENDPOINTS=[
+  "wss://api.derivws.com/trading/v1/options/ws/public",
+  "wss://ws.binaryws.com/websockets/v3"
+];
+
+function connect(){
+  if(ws && (ws.readyState===WebSocket.OPEN || ws.readyState===WebSocket.CONNECTING)) return;
+  clearTimeout(reconnectTimer);
+  const sym=$("symbol").value;
+  const endpoint=ENDPOINTS[endpointIndex];
+  setStatus("Connecting…");
+  ws=new WebSocket(endpoint);
+
+  ws.onopen=()=>{
+    setStatus("Connected • loading ticks");
+    // Public market-data endpoint: no authentication is required.
+    ws.send(JSON.stringify({ticks:sym,subscribe:1,req_id:2}));
+    ws.send(JSON.stringify({ticks_history:sym,count:500,end:"latest",style:"ticks",req_id:3}));
+    ws.send(JSON.stringify({ping:1,req_id:99}));
+  };
+
+  ws.onmessage=e=>{
+    let x;
+    try{x=JSON.parse(e.data)}catch(err){setStatus("Bad JSON from server");return}
+
+    if(x.error){
+      setStatus("Deriv error: "+(x.error.code||"")+" "+(x.error.message||""));
+      return;
+    }
+
+    if(x.msg_type==="history"){
+      const prices=x.history?.prices||[];
+      const ps=x.history?.pip_size;
+      ticks=[];
+      prices.forEach(q=>{
+        const d=digitFromValue(q,ps);
+        if(d!==null)ticks.push(d);
+      });
+      ticks=ticks.slice(-500);
+      render();
+      setStatus("Connected • live ticks");
+    }
+
+    if(x.msg_type==="tick"){
+      onTick(x.tick);
+    }
+  };
+
+  ws.onerror=()=>{
+    setStatus("WebSocket error — trying fallback…");
+  };
+
+  ws.onclose=(ev)=>{
+    ws=null;
+    const reason=ev.reason ? " "+ev.reason : "";
+    // Try the other official public endpoint once automatically.
+    if(endpointIndex < ENDPOINTS.length-1){
+      endpointIndex++;
+      setStatus("Endpoint closed ("+(ev.code||"")+")"+reason+" — retrying");
+      reconnectTimer=setTimeout(connect,800);
+    }else{
+      endpointIndex=0;
+      setStatus("Disconnected ("+(ev.code||"")+")"+reason+" — press Connect");
+    }
+  };
+}
+
+function digitFromValue(value,pipSize){
+  const q=Number(value);
+  if(!Number.isFinite(q)) return null;
+  if(Number.isFinite(Number(pipSize))){
+    const p=Number(pipSize);
+    return Number(q.toFixed(p).slice(-1));
+  }
+  // V100 (1s) is documented with pip_size 0.01; use 2 decimals if absent.
+  return Number(q.toFixed(2).slice(-1));
+}
+
+function digitFromTick(t){
+  return digitFromValue(t?.quote,t?.pip_size);
+}
+
+function onTick(t){
+  const d=digitFromTick(t);
+  if(d===null)return;
+  $("quote").textContent=String(t.quote);
+  // IMPORTANT: score the previous locked prediction BEFORE using this tick.
+  lockAndScore(d);
+  const m=model();
+  if(m) locked={pred:m.best,prev:m.prev,time:Date.now()};
+  ticks.push(d);
+  if(ticks.length>1000)ticks=ticks.slice(-1000);
+  render();
+}
+function disconnect(){
+  clearTimeout(reconnectTimer);
+  reconnectTimer=null;
+  endpointIndex=0;
+  if(ws){ws.onclose=null;ws.close();ws=null}
+  setStatus("Disconnected");
+}
+function clearData(){ticks=[];locked=null;signals=0;correct=0;logRows=[];$("signals").textContent="0";$("correct").textContent="0";$("accuracy").textContent="—";$("log").innerHTML="";render()}
+$("connect").onclick=connect;$("disconnect").onclick=disconnect;$("clear").onclick=clearData;
+$("window").onchange=render;
+render();
+</script>
+</body>
+</html>
